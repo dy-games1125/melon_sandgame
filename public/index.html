@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>멜론 샌드박스</title>
+<style>
+:root{--bg:#f1f7e6;--fg:#1d2b17;--card:#fff;--ac:#5fae3c;--bd:#c6d8b3;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#13200e;--fg:#e8f2dc;--card:#1f2e18;--bd:#3a5030}}
+:root[data-theme="dark"]{--bg:#13200e;--fg:#e8f2dc;--card:#1f2e18;--bd:#3a5030}
+html,body{height:100%}body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif}
+[hidden]{display:none!important}
+#app{max-width:940px;margin:auto;padding:10px}
+h1,h2{margin:.4em 0}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:9px 14px;margin:3px;font:inherit;cursor:pointer}
+.g{display:flex;flex-wrap:wrap}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px;margin:4px;flex:1 1 150px;text-align:center}
+.chip{display:inline-block;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:5px 10px;margin:3px;cursor:grab}
+.chip.on{outline:2px solid var(--ac)}
+canvas{width:100%;display:block;border-radius:10px;background:linear-gradient(#bfe6ff,#eaf7d8)}
+#res{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.tb{overflow-x:auto}table{border-collapse:collapse;width:100%}td,th{border:1px solid var(--bd);padding:5px;text-align:left}
+input{padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg);font:inherit;width:100%;max-width:300px;box-sizing:border-box}#bar{display:flex;align-items:center}</style>
+</head><body><div id="app">
+<p id="msg" style="min-height:1.2em;color:#d22;margin:4px"></p>
+<div id="ui"></div>
+<div id="bar" hidden><span id="sp"><button onclick="spd=1">×1</button><button onclick="spd=2">×2</button><button onclick="spd=3">×3</button></span><span id="al"></span><button onclick="exitB()">나가기</button></div>
+<div style="position:relative"><canvas id="cv" width="900" height="400" hidden></canvas><div id="res" hidden></div></div>
+</div>
+<script src="sim.js"></script>
+<script src="render.js"></script>
+<script>
+const DEF=()=>({mode:'ffa',ch:[0].map(i=>({n:'멜론'+(i+1),w:8,a:null,t:i%2})),ia:[],al:1});
+const SRV=window.SERVER_URL||new URLSearchParams(location.search).get('server')||(location.origin.startsWith('http')?location.origin:'http://localhost:3000');
+let G=DEF(),RM=null,sock=null,on=0,inB=0,sel=null,spd=1,lt=0,tk=0,fd=0;
+const say=t=>$('#msg').textContent=t;
+function ui(h){tk++;$('#ui').innerHTML=h;$('#ui').hidden=0;cv.hidden=1;$('#bar').hidden=1;$('#res').hidden=1}
+function menu(){ui(`<h1>🍈 멜론 샌드박스</h1><div class="g"><button onclick="G=DEF();on=0;lobby()">게임 시작</button><button onclick="oform(1)">온라인 방 만들기</button><button onclick="oform(0)">방 코드로 참가</button><button onclick="cdx(0)">무기 도감</button><button onclick="cdx(1)">능력 도감</button></div>`)}
+function cdx(k){ui(`<h2>${k?'능력':'무기'} 도감</h2><div class="tb"><table>${k?'<tr><th>능력</th><th>효과</th></tr>'+A.filter((a,i)=>i!=6).map(a=>`<tr><td>${a.n}</td><td>${a.e}</td></tr>`).join(''):'<tr><th>무기</th><th>공격</th><th>간격</th><th>특수 스킬</th><th>쿨타임</th></tr>'+[0,1,2,3,4,5,6,7,9,10,11,12,13,14,15,16,17,18,19,20].map(i=>[W[i],i]).map(([w,i])=>`<tr><td>${EM[i]} ${w.n}</td><td>${w.d}</td><td>${w.i}초</td><td>${w.s}</td><td>${w.cd?w.cd+'초':'-'}</td></tr>`).join('')}</table></div><button onclick="menu()">뒤로</button>`)}
+function oform(cr){ui(`<h2>${cr?'온라인 방 만들기':'방 코드로 참가'}</h2><p><input id="nk" maxlength="10" placeholder="닉네임 (필수)"></p>${cr?'':'<p><input id="cd" maxlength="6" inputmode="numeric" placeholder="6자리 방 코드"></p>'}<p><input id="sv" value="${SRV}" placeholder="서버 주소"></p><button onclick="conn(${cr})">${cr?'방 만들기':'참가'}</button><button onclick="menu()">뒤로</button>`)}
+function conn(cr){const nick=$('#nk').value.trim(),cd=cr?'':$('#cd').value.trim(),url=$('#sv').value.trim().replace(/\/$/,'');
+ if(!nick)return say('닉네임을 입력하세요');if(!cr&&!/^\d{6}$/.test(cd))return say('6자리 방 코드를 입력하세요');
+ say('서버에 연결 중…');
+ const go2=()=>{if(sock)sock.disconnect();sock=io(url,{reconnection:false,timeout:6000});
+  sock.on('connect',()=>sock.emit(cr?'create':'join',{nick,code:cd},r=>{if(r&&r.err){say(r.err);sock.disconnect()}else say('')}));
+  sock.on('connect_error',()=>{say('서버에 연결할 수 없어요. 서버 주소와 실행 여부를 확인하세요.');sock.disconnect()});
+  sock.on('disconnect',()=>{if(on){on=0;RM=null;inB=0;menu();say('서버와 연결이 끊겼어요.')}});
+  sock.on('room',d=>{on=1;RM=d;if(!inB)lobby()});
+  sock.on('begin',()=>{inB=1;fd=0;mode=RM.mode;showB()});
+  sock.on('snap',d=>{F=d.F;P=d.P;M=d.M;E=d.E;if(d.over&&!fd){fd=1;fin(F[d.win],0)}});
+  sock.on('err',say)};
+ if(window.io)return go2();
+ const s=document.createElement('script');s.src=url+'/socket.io/socket.io.js';s.onload=go2;s.onerror=()=>say('서버에 연결할 수 없어요.');document.head.appendChild(s)}
+function leave(){on=0;RM=null;inB=0;if(sock)sock.disconnect();menu()}
+function exitB(){if(on)leave();else{G=DEF();lobby()}}
+function lobby(){const T=(on?RM.mode:G.mode)=='team',host=!on||RM.host==sock.id,me=on?RM.me:null;
+ const pl=on?[0,1,2,3].map(i=>RM.players[i]):G.ch,iw=on?me.iw:[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20],ia=on?me.ia:[0,1,2,3,4,5,6,7,8,9,10,11,12,13],mi=on?RM.players.findIndex(p=>p.id==sock.id):-1;
+ const cards=pl.map((x,i)=>!x?`<div class="card" style="opacity:.55;display:flex;align-items:center;justify-content:center">대기 중…</div>`:
+ `<div class="card" ${!on||i==mi?`onclick="eq(${i})" ondragover="event.preventDefault()" ondrop="dp(event,${i})"`:''}><div style="font-size:32px">🍈${EM[x.w]}</div><b>${on?esc(x.nick)+(i==mi?' (나)':'')+(x.id==RM.host?' 👑':''):x.n}</b><div>${W[x.w].n}</div><div>${x.a==null?'능력 없음':A[x.a].n}</div>${!on&&G.ch.length>1?`<button onclick="event.stopPropagation();delC(${i})" style="background:#888">삭제</button>`:''}${T?(host?`<button onclick="event.stopPropagation();tm(${i})" style="background:${COL[x.t]}">${x.t?'블루':'레드'}팀</button>`:`<div style="color:${COL[x.t]}">${x.t?'블루':'레드'}팀</div>`):''}</div>`).join('');
+ const chips=(arr,k,nm,em)=>arr.map((v,j)=>`<span class="chip ${sel&&sel[0]==k&&sel[1]==j?'on':''}" draggable="true" ondragstart="event.dataTransfer.setData('t','${k}${j}')" onclick="sel=['${k}',${j}];lobby()">${em?em[v]:''} ${nm[v].n}</span>`).join('')||'<i>비어 있음</i>';
+ ui(`<h2>${on?'방 코드 '+RM.code:'로비'}</h2>${host?`<div>모드: <button onclick="md('ffa')" ${T?'style="opacity:.5"':''}>개인전</button><button onclick="md('team')" ${T?'':'style="opacity:.5"'}>2대2 팀전</button></div>`:`<div>모드: ${T?'2대2 팀전':'개인전'}</div>`}<div class="g">${cards}${!on&&G.ch.length<4?'<div class="card" onclick="addC()" style="cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:36px">＋</div>':''}</div>
+<div>${on?`<button onclick="roll(0)">무기 뽑기 (${me.wl}/3)</button><button onclick="roll(1)">능력 뽑기 (${me.al}/1)</button>`:''}</div>
+<p><b>${on?'내 ':''}무기 보관함</b><br>${chips(iw,'w',W,EM)}</p><p><b>${on?'내 ':''}능력 보관함</b><br>${chips(ia,'a',A)}</p>
+<p style="opacity:.7">장비를 끌어다 ${on?'내 ':''}캐릭터에 놓거나, 선택 후 카드를 누르세요.</p>
+${host?`<button onclick="start()" style="font-size:16px">⚔️ 결투 시작</button>`:'<p>방장이 결투를 시작할 때까지 기다리는 중…</p>'}<button onclick="${on?'leave()':'menu()'}">${on?'방 나가기':'메인'}</button>`)}
+const md=m=>on?sock.emit('mode',m):(G.mode=m,lobby()),tm=i=>on?sock.emit('team',RM.players[i].id):(G.ch[i].t^=1,lobby());
+function roll(k){if(on)return sock.emit('roll',k);if(k&&G.al){G.al--;G.ia.push(Math.floor(Math.random()*6));say('능력 획득: '+A[G.ia.at(-1)].n);lobby()}}
+function eq(i){if(!sel)return;const[k,j]=sel;sel=null;if(on)return sock.emit('equip',{k,j});if(k=='w')G.ch[i].w=j;else G.ch[i].a=j;lobby()}
+function dp(e,i){const s=e.dataTransfer.getData('t');sel=[s[0],+s.slice(1)];eq(i)}
+function delC(i){if(G.ch.length>1){G.ch.splice(i,1);G.ch.forEach((x,k)=>x.n='멜론'+(k+1));lobby()}}
+function addC(){const n=G.ch.length;if(n<4){G.ch.push({n:'멜론'+(n+1),w:8,a:null,t:n%2});lobby()}}
+function start(){if(on){if(RM.players.length<2)return say('플레이어가 2명 이상 필요해요');return sock.emit('start')}if(G.ch.length<2)return say('멜론이 2명 이상 필요해요');if(G.mode=='team'&&new Set(G.ch.map(x=>x.t)).size<2)return say('양 팀에 최소 1명씩 필요해요');spd=1;fd=0;init(G.ch,G.mode);showL()}
+function go(){spd=1;fd=0;init(G.ch,G.mode);showL()}
+function show(){$('#ui').hidden=1;$('#res').hidden=1;cv.hidden=0;$('#bar').hidden=0;say('')}
+function showL(){show();$('#sp').hidden=0;lt=performance.now();const k=++tk;requestAnimationFrame(lt2(k))}
+const lt2=k=>n=>{if(k!=tk)return;const dt=Math.min(.05,(n-lt)/1000);lt=n;for(let i=0;i<spd;i++)step(dt);draw();if(ended&&et>1.2&&!fd){fd=1;fin(F[win],1)}requestAnimationFrame(lt2(k))};
+function showB(){show();$('#sp').hidden=1;F=[];const k=++tk;requestAnimationFrame(vt(k))}
+const vt=k=>n=>{if(k!=tk)return;draw();if(on&&RM){const f=F[RM.players.findIndex(p=>p.id==sock.id)];if(f&&!f.dead){c.fillStyle='#000';c.font='bold 14px sans-serif';c.textAlign='center';c.fillText('▼ 나',f.x,f.y-86*f.s)}}requestAnimationFrame(vt(k))};
+const esc=s=>String(s).replace(/[&<>"']/g,ch=>'&#'+ch.charCodeAt(0)+';');
+function fin(w,loc){const nm=!w?'':mode=='team'?F.filter(f=>f.team==w.team).map(f=>f.n).join(', '):w.n,t=w?esc(nm)+' 승리! 🏆':'무승부';
+ $('#res').innerHTML=`<div class="card" style="flex:none;padding:20px"><h2>${t}</h2><p>잠시 후 대기 화면으로 돌아가요…</p></div>`;$('#res').hidden=0;
+ setTimeout(()=>{if($('#res').hidden)return;if(loc){G=DEF();lobby()}else if(on&&RM){inB=0;lobby()}},3500)}
+menu();
+</script></body></html>
